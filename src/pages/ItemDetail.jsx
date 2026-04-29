@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
-import { itemTrueCost, itemSupplyCost, itemTrueProfit } from '../storage';
+import { itemTrueCost, itemSupplyCost, itemTrueProfit, supplyRemaining } from '../storage';
 import { CATEGORIES, QUALITY_TIERS } from '../constants';
 import PageHeader from '../components/layout/PageHeader';
 import Button from '../components/ui/Button';
@@ -13,10 +14,17 @@ function catIcon(id)  { return CATEGORIES.find(c => c.id === id)?.icon  || '✦'
 export default function ItemDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { items, allocs, supplies, saveItems } = useApp();
+  const { items, allocs, supplies, saveItems, saveAllocs } = useApp();
 
   const item = items.find(i => i.id === id);
   if (!item) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--dust)' }}>Item not found.</div>;
+
+  // Initialise pctMap from existing allocs for this item
+  const existingAllocs = allocs.filter(a => a.itemId === id);
+  const [pctMap, setPctMap] = useState(() =>
+    existingAllocs.reduce((m, a) => ({ ...m, [a.supplyId]: a.pctUsed }), {})
+  );
+  const [supplyOpen, setSupplyOpen] = useState(false);
 
   const trueCost = itemTrueCost(item, allocs);
   const supplyCost = itemSupplyCost(item.id, allocs);
@@ -26,8 +34,45 @@ export default function ItemDetail() {
     ? itemTrueProfit(item, allocs)
     : null;
 
-  const itemAllocs = allocs.filter(a => a.itemId === id);
   const tierLabel = QUALITY_TIERS.find(t => t.id === item.qualityTier)?.label;
+
+  // Supplies to show: active (has remaining) + any already allocated to this item
+  const allocatedSupplyIds = new Set(existingAllocs.map(a => a.supplyId));
+  const visibleSupplies = supplies.filter(s =>
+    supplyRemaining(s, allocs) > 0 || allocatedSupplyIds.has(s.id)
+  );
+
+  function calcAlloc(supply, pct) {
+    const qtyUsed = (supply.totalQty * pct) / 100;
+    const costPerUnit = supply.totalCost / supply.totalQty;
+    return { qtyUsed, costAllocated: qtyUsed * costPerUnit };
+  }
+
+  const pendingSupplyCost = visibleSupplies.reduce((sum, s) => {
+    const pct = parseFloat(pctMap[s.id]) || 0;
+    return pct > 0 ? sum + calcAlloc(s, pct).costAllocated : sum;
+  }, 0);
+
+  function saveAllocations() {
+    const otherAllocs = allocs.filter(a => a.itemId !== id);
+    const newAllocs = visibleSupplies
+      .filter(s => parseFloat(pctMap[s.id]) > 0)
+      .map(s => {
+        const pct = parseFloat(pctMap[s.id]);
+        const { qtyUsed, costAllocated } = calcAlloc(s, pct);
+        return {
+          id: `${id}-${s.id}`,
+          itemId: id,
+          supplyId: s.id,
+          pctUsed: pct,
+          qtyUsed,
+          costAllocated,
+          date: new Date().toISOString(),
+        };
+      });
+    saveAllocs([...otherAllocs, ...newAllocs]);
+    showToast('Supply allocations saved.');
+  }
 
   function handleDelete() {
     if (!confirm('Delete this item? This cannot be undone.')) return;
@@ -134,6 +179,117 @@ export default function ItemDetail() {
             </div>
           )}
 
+          {/* Supply allocation — interactive, always available */}
+          <div className="card" style={{ marginBottom: 12, overflow: 'hidden' }}>
+            <button
+              onClick={() => setSupplyOpen(o => !o)}
+              style={{
+                width: '100%', padding: '14px 16px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)' }}>Supplies Used</div>
+                <div style={{ fontSize: 11, color: 'var(--dust)' }}>
+                  {existingAllocs.length > 0 ? `${existingAllocs.length} supply allocated` : 'tap to add'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {supplyCost > 0 && (
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--sienna)' }}>
+                    ${supplyCost.toFixed(2)}
+                  </span>
+                )}
+                <span style={{ color: 'var(--dust)', fontSize: 18 }}>{supplyOpen ? '▲' : '▼'}</span>
+              </div>
+            </button>
+
+            {supplyOpen && (
+              <div style={{ borderTop: '1.5px solid var(--sand)' }}>
+                {visibleSupplies.length === 0 ? (
+                  <div style={{ padding: 16, fontSize: 13, color: 'var(--dust)', textAlign: 'center' }}>
+                    No supplies available. Add some in the Supplies tab.
+                  </div>
+                ) : (
+                  visibleSupplies.map((supply, i) => {
+                    const pct = parseFloat(pctMap[supply.id]) || 0;
+                    const { qtyUsed, costAllocated } = pct > 0 ? calcAlloc(supply, pct) : { qtyUsed: 0, costAllocated: 0 };
+                    const rem = supplyRemaining(supply, allocs);
+                    return (
+                      <div key={supply.id}>
+                        {i > 0 && <hr className="divider" />}
+                        <div style={{ padding: '14px 16px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                            <div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--charcoal)' }}>
+                                {supply.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--dust)' }}>
+                                {supply.brand} · {rem.toFixed(1)} {supply.unit} remaining
+                              </div>
+                            </div>
+                            {pct > 0 && (
+                              <div style={{ fontSize: 12, color: 'var(--sage)', fontWeight: 600, textAlign: 'right' }}>
+                                {qtyUsed.toFixed(1)} {supply.unit}<br />
+                                ${costAllocated.toFixed(2)}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <input
+                              type="number"
+                              min="0" max="100" step="1"
+                              value={pctMap[supply.id] ?? ''}
+                              onChange={e => setPctMap(m => ({ ...m, [supply.id]: e.target.value }))}
+                              placeholder="0"
+                              style={{
+                                width: 70, padding: '8px 12px', borderRadius: 10,
+                                border: '1.5px solid var(--sand)', fontSize: 15,
+                                fontFamily: "'DM Sans', sans-serif", color: 'var(--charcoal)',
+                                textAlign: 'center',
+                              }}
+                            />
+                            <span style={{ fontSize: 13, color: 'var(--dust)' }}>% used</span>
+                            {pct > 0 && (
+                              <span style={{ fontSize: 12, color: 'var(--bark)' }}>
+                                = ${costAllocated.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                {visibleSupplies.length > 0 && (
+                  <div style={{
+                    padding: '12px 16px',
+                    borderTop: '1.5px solid var(--sand)',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    background: 'var(--cream)',
+                  }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)' }}>
+                      Total: ${pendingSupplyCost.toFixed(2)}
+                    </span>
+                    <button
+                      onClick={saveAllocations}
+                      style={{
+                        padding: '8px 20px', borderRadius: 10,
+                        background: 'var(--sienna)', color: '#fff',
+                        border: 'none', fontSize: 13, fontWeight: 700,
+                        cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                      }}
+                    >
+                      Save
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Meta info */}
           <div className="card" style={{ padding: 16, marginBottom: 12 }}>
             <div className="label-caps" style={{ marginBottom: 12 }}>Details</div>
@@ -154,30 +310,6 @@ export default function ItemDetail() {
               ))}
             </div>
           </div>
-
-          {/* Supply allocations */}
-          {itemAllocs.length > 0 && (
-            <div className="card" style={{ padding: 16, marginBottom: 12 }}>
-              <div className="label-caps" style={{ marginBottom: 12 }}>Supplies Used</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {itemAllocs.map(alloc => {
-                  const supply = supplies.find(s => s.id === alloc.supplyId);
-                  if (!supply) return null;
-                  return (
-                    <div key={alloc.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{supply.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--dust)' }}>{alloc.pctUsed}% used · {alloc.qtyUsed.toFixed(1)} {supply.unit}</div>
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--sienna)' }}>
-                        ${alloc.costAllocated.toFixed(2)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           {/* AI Listing preview */}
           {item.aiTitle && (
