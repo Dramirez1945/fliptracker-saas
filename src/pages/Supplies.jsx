@@ -10,9 +10,11 @@ import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
 
 export default function Supplies() {
-  const { supplies, allocs, saveSupplies } = useApp();
+  const { supplies, allocs, saveSupplies, saveAllocs } = useApp();
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [collapsed, setCollapsed] = useState({});
+  const [deletePrompt, setDeletePrompt] = useState(null); // { supply, remQty, remVal }
 
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
@@ -28,15 +30,30 @@ export default function Supplies() {
     setName(''); setBrand(''); setCategory(''); setTotalQty('');
     setUnit('oz'); setTotalCost(''); setStore(''); setNotes('');
     setPurchaseDate(new Date().toISOString().slice(0, 10));
+    setEditingId(null);
   }
 
-  function handleAdd() {
+  function openEdit(supply) {
+    setName(supply.name);
+    setBrand(supply.brand || '');
+    setCategory(supply.category || '');
+    setTotalQty(String(supply.totalQty));
+    setUnit(supply.unit || 'oz');
+    setTotalCost(String(supply.totalCost));
+    setStore(supply.store || '');
+    setNotes(supply.notes || '');
+    setPurchaseDate(supply.purchaseDate || new Date().toISOString().slice(0, 10));
+    setEditingId(supply.id);
+    setShowAdd(true);
+  }
+
+  function handleSave() {
     if (!name || !totalQty || !totalCost) {
       showToast('Name, quantity and cost are required', 'error');
       return;
     }
-    const newSupply = {
-      id: Date.now().toString(),
+    const record = {
+      id: editingId || Date.now().toString(),
       name, brand, category,
       totalQty: parseFloat(totalQty),
       unit,
@@ -45,10 +62,49 @@ export default function Supplies() {
       store,
       notes,
     };
-    saveSupplies([...supplies, newSupply]);
-    showToast('Supply added!');
+    if (editingId) {
+      saveSupplies(supplies.map(s => s.id === editingId ? record : s));
+      showToast('Supply updated!');
+    } else {
+      saveSupplies([...supplies, record]);
+      showToast('Supply added!');
+    }
     resetForm();
     setShowAdd(false);
+  }
+
+  function handleDeleteClick(supply) {
+    const remQty = supplyRemaining(supply, allocs);
+    const remVal = supplyValueRemaining(supply, allocs);
+    if (remQty <= 0) {
+      saveSupplies(supplies.filter(s => s.id !== supply.id));
+      showToast('Supply deleted.');
+    } else {
+      setDeletePrompt({ supply, remQty, remVal });
+    }
+  }
+
+  function handleWriteOff() {
+    saveSupplies(supplies.filter(s => s.id !== deletePrompt.supply.id));
+    setDeletePrompt(null);
+    showToast('Supply written off.');
+  }
+
+  function handleSplitAcrossItems() {
+    const { supply, remVal } = deletePrompt;
+    const supplyAllocs = allocs.filter(a => a.supplyId === supply.id);
+    const totalAllocQty = supplyAllocs.reduce((sum, a) => sum + a.qtyUsed, 0);
+
+    const updatedAllocs = allocs.map(a => {
+      if (a.supplyId !== supply.id || totalAllocQty === 0) return a;
+      const share = a.qtyUsed / totalAllocQty;
+      return { ...a, costAllocated: a.costAllocated + share * remVal };
+    });
+
+    saveAllocs(updatedAllocs);
+    saveSupplies(supplies.filter(s => s.id !== supply.id));
+    setDeletePrompt(null);
+    showToast('Remainder split across items. Supply deleted.');
   }
 
   const totalSpent = supplies.reduce((s, sup) => s + sup.totalCost, 0);
@@ -141,6 +197,32 @@ export default function Supplies() {
                             {supply.notes}
                           </div>
                         )}
+
+                        {/* Edit / Delete row */}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                          <button
+                            onClick={() => openEdit(supply)}
+                            style={{
+                              flex: 1, padding: '7px 0', borderRadius: 8,
+                              border: '1.5px solid var(--sand)', background: '#fff',
+                              color: 'var(--bark)', fontSize: 13, fontWeight: 600,
+                              cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteClick(supply)}
+                            style={{
+                              flex: 1, padding: '7px 0', borderRadius: 8,
+                              border: '1.5px solid var(--sienna)', background: '#fff',
+                              color: 'var(--sienna)', fontSize: 13, fontWeight: 600,
+                              cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -156,11 +238,11 @@ export default function Supplies() {
             </div>
           )}
 
-          {/* Add Supply form */}
+          {/* Add / Edit Supply form */}
           {showAdd && (
             <div className="card fade-up" style={{ padding: 16, marginTop: 16, marginBottom: 16 }}>
               <h3 style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, marginBottom: 16, color: 'var(--charcoal)' }}>
-                Add Supply
+                {editingId ? 'Edit Supply' : 'Add Supply'}
               </h3>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -231,8 +313,8 @@ export default function Supplies() {
                   <Button variant="secondary" style={{ flex: 1 }} onClick={() => { setShowAdd(false); resetForm(); }}>
                     Cancel
                   </Button>
-                  <Button style={{ flex: 1 }} onClick={handleAdd}>
-                    Add Supply
+                  <Button style={{ flex: 1 }} onClick={handleSave}>
+                    {editingId ? 'Save Changes' : 'Add Supply'}
                   </Button>
                 </div>
               </div>
@@ -246,7 +328,7 @@ export default function Supplies() {
       {/* FAB */}
       {!showAdd && (
         <button
-          onClick={() => setShowAdd(true)}
+          onClick={() => { resetForm(); setShowAdd(true); }}
           style={{
             position: 'fixed',
             bottom: 76,
@@ -266,6 +348,66 @@ export default function Supplies() {
         >
           +
         </button>
+      )}
+
+      {/* Delete prompt modal */}
+      {deletePrompt && (
+        <div
+          onClick={() => setDeletePrompt(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            zIndex: 200, padding: '0 0 env(safe-area-inset-bottom)',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="card"
+            style={{ width: '100%', maxWidth: 430, borderRadius: '20px 20px 0 0', padding: 24, paddingBottom: 32 }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 8 }}>
+              Delete Supply
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--bark)', marginBottom: 20 }}>
+              <strong>${deletePrompt.remVal.toFixed(2)}</strong> of {deletePrompt.supply.name} is unallocated.
+              What would you like to do?
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                onClick={handleWriteOff}
+                style={{
+                  padding: '14px 16px', borderRadius: 12, textAlign: 'left',
+                  border: '1.5px solid var(--sand)', background: '#fff',
+                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 2 }}>Write it off</div>
+                <div style={{ fontSize: 12, color: 'var(--dust)' }}>
+                  Delete the supply. Existing item costs stay exactly as-is. The remainder is treated as a loss.
+                </div>
+              </button>
+
+              <button
+                onClick={handleSplitAcrossItems}
+                style={{
+                  padding: '14px 16px', borderRadius: 12, textAlign: 'left',
+                  border: '1.5px solid var(--sage)', background: '#fff',
+                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 2 }}>Split across items</div>
+                <div style={{ fontSize: 12, color: 'var(--dust)' }}>
+                  Redistribute the ${deletePrompt.remVal.toFixed(2)} remainder proportionally to all items that used this supply.
+                </div>
+              </button>
+
+              <Button variant="secondary" onClick={() => setDeletePrompt(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
