@@ -12,6 +12,7 @@ import MarkSold from './pages/MarkSold';
 import GenerateListing from './pages/GenerateListing';
 import Supplies from './pages/Supplies';
 import ArchivedSupplies from './pages/ArchivedSupplies';
+import EditArchivedSupply from './pages/EditArchivedSupply';
 import SalesHistory from './pages/SalesHistory';
 
 const AppCtx = createContext(null);
@@ -62,7 +63,8 @@ function Layout() {
         <Route path="/item/:id/sold"    element={<MarkSold />} />
         <Route path="/item/:id/listing" element={<GenerateListing />} />
         <Route path="/supplies"          element={<Supplies />} />
-        <Route path="/supplies/archived" element={<ArchivedSupplies />} />
+        <Route path="/supplies/archived"     element={<ArchivedSupplies />} />
+        <Route path="/supplies/archived/:id" element={<EditArchivedSupply />} />
         <Route path="/sales"            element={<SalesHistory />} />
       </Routes>
       <BottomNav />

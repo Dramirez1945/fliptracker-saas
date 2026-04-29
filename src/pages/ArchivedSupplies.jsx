@@ -38,7 +38,12 @@ export default function ArchivedSupplies() {
             {archived.map(supply => {
               const costPerUnit = supply.totalQty > 0 ? supply.totalCost / supply.totalQty : 0;
               return (
-                <div key={supply.id} className="card" style={{ padding: '14px 16px' }}>
+                <div
+                  key={supply.id}
+                  className="card"
+                  onClick={() => navigate(`/supplies/archived/${supply.id}`)}
+                  style={{ padding: '14px 16px', cursor: 'pointer' }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--charcoal)' }}>
@@ -48,11 +53,14 @@ export default function ArchivedSupplies() {
                         <div style={{ fontSize: 12, color: 'var(--dust)' }}>{supply.brand}</div>
                       )}
                     </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--sienna)' }}>
-                        ${supply.totalCost.toFixed(2)}
+                    <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--sienna)' }}>
+                          ${supply.totalCost.toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--dust)' }}>total spent</div>
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--dust)' }}>total spent</div>
+                      <span style={{ color: 'var(--dust)', fontSize: 18 }}>›</span>
                     </div>
                   </div>
 
