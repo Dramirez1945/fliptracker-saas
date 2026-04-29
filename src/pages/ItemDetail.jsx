@@ -23,6 +23,9 @@ export default function ItemDetail() {
     existingAllocs.reduce((m, a) => ({ ...m, [a.supplyId]: a.pctUsed }), {})
   );
   const [supplyOpen, setSupplyOpen] = useState(false);
+  const [editAlloc, setEditAlloc] = useState(null); // { supply }
+  const [editPct, setEditPct] = useState('');
+  const [removePrompt, setRemovePrompt] = useState(null); // { supply }
 
   const item = items.find(i => i.id === id);
   if (!item) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--dust)' }}>Item not found.</div>;
@@ -54,6 +57,20 @@ export default function ItemDetail() {
     return pct > 0 ? sum + calcAlloc(s, pct).costAllocated : sum;
   }, 0);
 
+  function runAutoArchive(newAllocs) {
+    let updatedSupplies = [...supplies];
+    let anyArchived = false;
+    supplies
+      .filter(s => (s.status || 'active') === 'active')
+      .forEach(s => {
+        if (supplyRemaining(s, newAllocs) <= 0) {
+          updatedSupplies = archiveSupply(s, updatedSupplies);
+          anyArchived = true;
+        }
+      });
+    if (anyArchived) saveSupplies(updatedSupplies);
+  }
+
   function saveAllocations() {
     const otherAllocs = allocs.filter(a => a.itemId !== id);
     const newItemAllocs = visibleSupplies
@@ -73,21 +90,51 @@ export default function ItemDetail() {
       });
     const newAllocs = [...otherAllocs, ...newItemAllocs];
     saveAllocs(newAllocs);
-
-    // Auto-archive any active supply that just hit 0 remaining
-    let updatedSupplies = [...supplies];
-    let anyArchived = false;
-    supplies
-      .filter(s => (s.status || 'active') === 'active')
-      .forEach(supply => {
-        if (supplyRemaining(supply, newAllocs) <= 0) {
-          updatedSupplies = archiveSupply(supply, updatedSupplies);
-          anyArchived = true;
-        }
-      });
-    if (anyArchived) saveSupplies(updatedSupplies);
-
+    runAutoArchive(newAllocs);
     showToast('Supply allocations saved.');
+  }
+
+  function handleOpenEdit(supply) {
+    setEditAlloc({ supply });
+    setEditPct(String(pctMap[supply.id] ?? ''));
+  }
+
+  function handleSaveEdit() {
+    const { supply } = editAlloc;
+    const pct = parseFloat(editPct);
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      showToast('Enter a value between 0 and 100', 'error');
+      return;
+    }
+    const { qtyUsed, costAllocated } = calcAlloc(supply, pct);
+    const updatedAlloc = {
+      id: `${id}-${supply.id}`,
+      itemId: id,
+      supplyId: supply.id,
+      pctUsed: pct,
+      qtyUsed,
+      costAllocated,
+      date: new Date().toISOString(),
+    };
+    const newAllocs = [
+      ...allocs.filter(a => !(a.itemId === id && a.supplyId === supply.id)),
+      updatedAlloc,
+    ];
+    saveAllocs(newAllocs);
+    setPctMap(m => ({ ...m, [supply.id]: pct }));
+    runAutoArchive(newAllocs);
+    setEditAlloc(null);
+    showToast('Allocation updated.');
+  }
+
+  function handleConfirmRemove() {
+    const { supply } = removePrompt;
+    const newAllocs = allocs.filter(a => !(a.itemId === id && a.supplyId === supply.id));
+    saveAllocs(newAllocs);
+    setPctMap(m => { const next = { ...m }; delete next[supply.id]; return next; });
+    runAutoArchive(newAllocs);
+    setRemovePrompt(null);
+    showToast('Allocation removed.');
   }
 
   function handleDelete() {
@@ -274,6 +321,32 @@ export default function ItemDetail() {
                               </span>
                             )}
                           </div>
+                          {pct > 0 && (
+                            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                              <button
+                                onClick={() => handleOpenEdit(supply)}
+                                style={{
+                                  flex: 1, padding: '7px 0', borderRadius: 8,
+                                  border: '1.5px solid var(--sand)', background: '#fff',
+                                  color: 'var(--bark)', fontSize: 12, fontWeight: 600,
+                                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => setRemovePrompt({ supply })}
+                                style={{
+                                  flex: 1, padding: '7px 0', borderRadius: 8,
+                                  border: '1.5px solid var(--sienna)', background: '#fff',
+                                  color: 'var(--sienna)', fontSize: 12, fontWeight: 600,
+                                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -386,6 +459,138 @@ export default function ItemDetail() {
           </button>
         </div>
       </div>
+
+      {/* Edit allocation modal */}
+      {editAlloc && (() => {
+        const { supply } = editAlloc;
+        const pct = parseFloat(editPct) || 0;
+        const { qtyUsed, costAllocated } = pct > 0 ? calcAlloc(supply, pct) : { qtyUsed: 0, costAllocated: 0 };
+        return (
+          <div
+            onClick={() => setEditAlloc(null)}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+              zIndex: 200, padding: '0 0 env(safe-area-inset-bottom)',
+            }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              className="card"
+              style={{ width: '100%', maxWidth: 430, borderRadius: '20px 20px 0 0', padding: 24, paddingBottom: 32 }}
+            >
+              <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 4 }}>
+                Edit Allocation
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--dust)', marginBottom: 20 }}>{supply.name}</div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <input
+                  type="number"
+                  min="0" max="100" step="1"
+                  value={editPct}
+                  onChange={e => setEditPct(e.target.value)}
+                  style={{
+                    width: 80, padding: '10px 12px', borderRadius: 10,
+                    border: '1.5px solid var(--sand)', fontSize: 18,
+                    fontFamily: "'DM Sans', sans-serif", color: 'var(--charcoal)',
+                    textAlign: 'center',
+                  }}
+                  autoFocus
+                />
+                <span style={{ fontSize: 14, color: 'var(--dust)' }}>% used</span>
+              </div>
+
+              {pct > 0 && (
+                <div style={{ background: 'var(--cream)', borderRadius: 10, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: 'var(--bark)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Quantity used</span>
+                    <span style={{ fontWeight: 600 }}>{qtyUsed.toFixed(2)} {supply.unit}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+                    <span>Cost allocated</span>
+                    <span style={{ fontWeight: 600, color: 'var(--sienna)' }}>${costAllocated.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => setEditAlloc(null)}
+                  style={{
+                    flex: 1, padding: '12px 0', borderRadius: 12,
+                    border: '1.5px solid var(--sand)', background: '#fff',
+                    fontSize: 14, fontWeight: 600, color: 'var(--bark)',
+                    cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  style={{
+                    flex: 1, padding: '12px 0', borderRadius: 12,
+                    background: 'var(--sienna)', border: 'none', color: '#fff',
+                    fontSize: 14, fontWeight: 700,
+                    cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Remove allocation confirm */}
+      {removePrompt && (
+        <div
+          onClick={() => setRemovePrompt(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            zIndex: 200, padding: '0 0 env(safe-area-inset-bottom)',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="card"
+            style={{ width: '100%', maxWidth: 430, borderRadius: '20px 20px 0 0', padding: 24, paddingBottom: 32 }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 8 }}>
+              Remove Allocation
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--bark)', marginBottom: 24 }}>
+              Remove this allocation and return it to stock?
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setRemovePrompt(null)}
+                style={{
+                  flex: 1, padding: '12px 0', borderRadius: 12,
+                  border: '1.5px solid var(--sand)', background: '#fff',
+                  fontSize: 14, fontWeight: 600, color: 'var(--bark)',
+                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmRemove}
+                style={{
+                  flex: 1, padding: '12px 0', borderRadius: 12,
+                  background: 'var(--sienna)', border: 'none', color: '#fff',
+                  fontSize: 14, fontWeight: 700,
+                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
