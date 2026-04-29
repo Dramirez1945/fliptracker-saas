@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
 import { itemTrueCost, itemSupplyCost, itemTrueProfit, supplyRemaining } from '../storage';
+import { archiveSupply } from '../archiveUtils';
 import { CATEGORIES, QUALITY_TIERS } from '../constants';
 import PageHeader from '../components/layout/PageHeader';
 import Button from '../components/ui/Button';
@@ -14,7 +15,7 @@ function catIcon(id)  { return CATEGORIES.find(c => c.id === id)?.icon  || '✦'
 export default function ItemDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { items, allocs, supplies, saveItems, saveAllocs } = useApp();
+  const { items, allocs, supplies, saveItems, saveAllocs, saveSupplies } = useApp();
 
   // All hooks must come before any conditional return
   const existingAllocs = allocs.filter(a => a.itemId === id);
@@ -55,7 +56,7 @@ export default function ItemDetail() {
 
   function saveAllocations() {
     const otherAllocs = allocs.filter(a => a.itemId !== id);
-    const newAllocs = visibleSupplies
+    const newItemAllocs = visibleSupplies
       .filter(s => parseFloat(pctMap[s.id]) > 0)
       .map(s => {
         const pct = parseFloat(pctMap[s.id]);
@@ -70,7 +71,22 @@ export default function ItemDetail() {
           date: new Date().toISOString(),
         };
       });
-    saveAllocs([...otherAllocs, ...newAllocs]);
+    const newAllocs = [...otherAllocs, ...newItemAllocs];
+    saveAllocs(newAllocs);
+
+    // Auto-archive any active supply that just hit 0 remaining
+    let updatedSupplies = [...supplies];
+    let anyArchived = false;
+    supplies
+      .filter(s => (s.status || 'active') === 'active')
+      .forEach(supply => {
+        if (supplyRemaining(supply, newAllocs) <= 0) {
+          updatedSupplies = archiveSupply(supply, updatedSupplies);
+          anyArchived = true;
+        }
+      });
+    if (anyArchived) saveSupplies(updatedSupplies);
+
     showToast('Supply allocations saved.');
   }
 

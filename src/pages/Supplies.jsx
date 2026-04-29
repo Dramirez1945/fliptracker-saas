@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../App';
 import { supplyRemaining, supplyValueRemaining } from '../storage';
+import { archiveSupply } from '../archiveUtils';
 import { SUPPLY_CATEGORIES, SUPPLY_UNITS } from '../constants';
 import { showToast } from '../components/ui/Toast';
 import PageHeader from '../components/layout/PageHeader';
@@ -10,6 +12,7 @@ import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
 
 export default function Supplies() {
+  const navigate = useNavigate();
   const { supplies, allocs, saveSupplies, saveAllocs } = useApp();
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -26,6 +29,10 @@ export default function Supplies() {
   const [store, setStore] = useState('');
   const [notes, setNotes] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
+
+  // Only show active supplies on this page
+  const activeSupplies = supplies.filter(s => (s.status || 'active') === 'active');
+  const archivedCount = supplies.filter(s => s.status === 'depleted').length;
 
   function resetForm() {
     setName(''); setBrand(''); setCategory(''); setTotalQty('');
@@ -62,6 +69,7 @@ export default function Supplies() {
       purchaseDate,
       store,
       notes,
+      status: 'active',
     };
     if (editingId) {
       saveSupplies(supplies.map(s => s.id === editingId ? incoming : s));
@@ -70,10 +78,10 @@ export default function Supplies() {
       setShowAdd(false);
       return;
     }
-    // Consolidation check for new supplies only
+    // Consolidation check against active supplies only
     const nameLower = name.trim().toLowerCase();
     const brandLower = brand.trim().toLowerCase();
-    const match = supplies.find(s => {
+    const match = activeSupplies.find(s => {
       const sName = s.name.trim().toLowerCase();
       const sBrand = (s.brand || '').trim().toLowerCase();
       if (sName !== nameLower) return false;
@@ -118,8 +126,9 @@ export default function Supplies() {
     const remQty = supplyRemaining(supply, allocs);
     const remVal = supplyValueRemaining(supply, allocs);
     if (remQty <= 0) {
-      saveSupplies(supplies.filter(s => s.id !== supply.id));
-      showToast('Supply deleted.');
+      // Fully used — archive instead of delete
+      saveSupplies(archiveSupply(supply, supplies));
+      showToast('Supply archived.');
     } else {
       setDeletePrompt({ supply, remQty, remVal });
     }
@@ -135,29 +144,32 @@ export default function Supplies() {
     const { supply, remVal } = deletePrompt;
     const supplyAllocs = allocs.filter(a => a.supplyId === supply.id);
     const totalAllocQty = supplyAllocs.reduce((sum, a) => sum + a.qtyUsed, 0);
-
     const updatedAllocs = allocs.map(a => {
       if (a.supplyId !== supply.id || totalAllocQty === 0) return a;
-      const share = a.qtyUsed / totalAllocQty;
-      return { ...a, costAllocated: a.costAllocated + share * remVal };
+      return { ...a, costAllocated: a.costAllocated + (a.qtyUsed / totalAllocQty) * remVal };
     });
-
     saveAllocs(updatedAllocs);
     saveSupplies(supplies.filter(s => s.id !== supply.id));
     setDeletePrompt(null);
     showToast('Remainder split across items. Supply deleted.');
   }
 
-  const totalSpent = supplies.reduce((s, sup) => s + sup.totalCost, 0);
+  function handleArchiveIt() {
+    saveSupplies(archiveSupply(deletePrompt.supply, supplies));
+    setDeletePrompt(null);
+    showToast('Supply archived.');
+  }
+
+  const totalSpent = activeSupplies.reduce((s, sup) => s + sup.totalCost, 0);
   const totalAllocated = allocs.reduce((s, a) => s + a.costAllocated, 0);
-  const totalPool = supplies.reduce((s, sup) => s + supplyValueRemaining(sup, allocs), 0);
+  const totalPool = activeSupplies.reduce((s, sup) => s + supplyValueRemaining(sup, allocs), 0);
 
   const byCategory = SUPPLY_CATEGORIES.reduce((acc, cat) => {
-    const items = supplies.filter(s => s.category === cat);
+    const items = activeSupplies.filter(s => s.category === cat);
     if (items.length > 0) acc[cat] = items;
     return acc;
   }, {});
-  const uncategorized = supplies.filter(s => !s.category || !SUPPLY_CATEGORIES.includes(s.category));
+  const uncategorized = activeSupplies.filter(s => !s.category || !SUPPLY_CATEGORIES.includes(s.category));
   if (uncategorized.length > 0) byCategory['Other'] = [...(byCategory['Other'] || []), ...uncategorized];
 
   const costPerUnit = (s) => s.totalQty > 0 ? s.totalCost / s.totalQty : 0;
@@ -174,7 +186,7 @@ export default function Supplies() {
             <StatCard label="Total Spent" value={`$${totalSpent.toFixed(0)}`} />
             <StatCard label="Allocated" value={`$${totalAllocated.toFixed(0)}`} valueColor="var(--sienna)" />
             <StatCard label="In Pool" value={`$${totalPool.toFixed(0)}`} valueColor="var(--sage)" />
-            <StatCard label="Products" value={supplies.length} />
+            <StatCard label="Active" value={activeSupplies.length} />
           </div>
 
           {/* Supply list by category */}
@@ -272,10 +284,10 @@ export default function Supplies() {
             </section>
           ))}
 
-          {supplies.length === 0 && (
+          {activeSupplies.length === 0 && (
             <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--dust)' }}>
               <div style={{ fontSize: 40, marginBottom: 12 }}>🪣</div>
-              <p>No supplies yet. Add your first one!</p>
+              <p>No active supplies. Add your first one!</p>
             </div>
           )}
 
@@ -362,6 +374,26 @@ export default function Supplies() {
             </div>
           )}
 
+          {/* Archived Supplies link */}
+          <button
+            onClick={() => navigate('/supplies/archived')}
+            style={{
+              width: '100%', marginTop: 8, marginBottom: 4,
+              padding: '14px 16px', borderRadius: 14,
+              border: '1.5px solid var(--sand)', background: 'var(--cream)',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+            }}
+          >
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)' }}>Archived Supplies</div>
+              <div style={{ fontSize: 12, color: 'var(--dust)' }}>
+                {archivedCount > 0 ? `${archivedCount} depleted supply${archivedCount !== 1 ? 's' : ''}` : 'None yet'}
+              </div>
+            </div>
+            <span style={{ color: 'var(--dust)', fontSize: 18 }}>›</span>
+          </button>
+
           <div style={{ height: 20 }} />
         </div>
       </div>
@@ -407,7 +439,7 @@ export default function Supplies() {
             style={{ width: '100%', maxWidth: 430, borderRadius: '20px 20px 0 0', padding: 24, paddingBottom: 32 }}
           >
             <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 8 }}>
-              Delete Supply
+              Remove Supply
             </div>
             <div style={{ fontSize: 14, color: 'var(--bark)', marginBottom: 20 }}>
               <strong>${deletePrompt.remVal.toFixed(2)}</strong> of {deletePrompt.supply.name} is unallocated.
@@ -425,7 +457,7 @@ export default function Supplies() {
               >
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 2 }}>Write it off</div>
                 <div style={{ fontSize: 12, color: 'var(--dust)' }}>
-                  Delete the supply. Existing item costs stay exactly as-is. The remainder is treated as a loss.
+                  Delete the supply. Item costs stay as-is. Remainder treated as a loss.
                 </div>
               </button>
 
@@ -440,6 +472,20 @@ export default function Supplies() {
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 2 }}>Split across items</div>
                 <div style={{ fontSize: 12, color: 'var(--dust)' }}>
                   Redistribute the ${deletePrompt.remVal.toFixed(2)} remainder proportionally to all items that used this supply.
+                </div>
+              </button>
+
+              <button
+                onClick={handleArchiveIt}
+                style={{
+                  padding: '14px 16px', borderRadius: 12, textAlign: 'left',
+                  border: '1.5px solid var(--gold)', background: '#fff',
+                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 2 }}>Archive it</div>
+                <div style={{ fontSize: 12, color: 'var(--dust)' }}>
+                  Ruined or tossed. Keep cost in history without reallocating.
                 </div>
               </button>
 
