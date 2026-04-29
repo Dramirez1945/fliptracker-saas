@@ -98,6 +98,13 @@ export default function EditArchivedSupply() {
     navigate('/supplies');
   }
 
+  function handleDeletePermanently() {
+    if (!confirm('This will permanently delete this supply and cannot be undone. Are you sure?')) return;
+    saveSupplies(supplies.filter(s => s.id !== id));
+    showToast('Supply permanently deleted.');
+    navigate('/supplies/archived');
+  }
+
   function handleKeepSeparate() {
     const { returning } = consolidatePrompt;
     saveSupplies(supplies.map(s => s.id === returning.id ? returning : s));
@@ -183,6 +190,17 @@ export default function EditArchivedSupply() {
             <Button size="full" variant="secondary" onClick={handleReturnToStock}>
               Return to Stock
             </Button>
+            <button
+              onClick={handleDeletePermanently}
+              style={{
+                width: '100%', marginTop: 6, padding: '12px 0',
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 13, color: '#B91C1C', fontWeight: 600,
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              Delete Permanently
+            </button>
           </div>
 
         </div>
