@@ -15,6 +15,7 @@ export default function Supplies() {
   const [editingId, setEditingId] = useState(null);
   const [collapsed, setCollapsed] = useState({});
   const [deletePrompt, setDeletePrompt] = useState(null); // { supply, remQty, remVal }
+  const [consolidatePrompt, setConsolidatePrompt] = useState(null); // { existing, incoming }
 
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
@@ -52,7 +53,7 @@ export default function Supplies() {
       showToast('Name, quantity and cost are required', 'error');
       return;
     }
-    const record = {
+    const incoming = {
       id: editingId || Date.now().toString(),
       name, brand, category,
       totalQty: parseFloat(totalQty),
@@ -63,12 +64,52 @@ export default function Supplies() {
       notes,
     };
     if (editingId) {
-      saveSupplies(supplies.map(s => s.id === editingId ? record : s));
+      saveSupplies(supplies.map(s => s.id === editingId ? incoming : s));
       showToast('Supply updated!');
-    } else {
-      saveSupplies([...supplies, record]);
-      showToast('Supply added!');
+      resetForm();
+      setShowAdd(false);
+      return;
     }
+    // Consolidation check for new supplies only
+    const nameLower = name.trim().toLowerCase();
+    const brandLower = brand.trim().toLowerCase();
+    const match = supplies.find(s => {
+      const sName = s.name.trim().toLowerCase();
+      const sBrand = (s.brand || '').trim().toLowerCase();
+      if (sName !== nameLower) return false;
+      if (!brandLower && !sBrand) return true;
+      return brandLower === sBrand;
+    });
+    if (match) {
+      setConsolidatePrompt({ existing: match, incoming });
+      return;
+    }
+    saveSupplies([...supplies, incoming]);
+    showToast('Supply added!');
+    resetForm();
+    setShowAdd(false);
+  }
+
+  function handleAddToStock() {
+    const { existing, incoming } = consolidatePrompt;
+    const merged = {
+      ...existing,
+      totalQty: existing.totalQty + incoming.totalQty,
+      totalCost: existing.totalCost + incoming.totalCost,
+      purchaseDate: new Date().toISOString().slice(0, 10),
+    };
+    saveSupplies(supplies.map(s => s.id === existing.id ? merged : s));
+    setConsolidatePrompt(null);
+    showToast('Added to existing stock.');
+    resetForm();
+    setShowAdd(false);
+  }
+
+  function handleKeepSeparate() {
+    const { incoming } = consolidatePrompt;
+    saveSupplies([...supplies, incoming]);
+    setConsolidatePrompt(null);
+    showToast('Supply added as separate record.');
     resetForm();
     setShowAdd(false);
   }
@@ -403,6 +444,76 @@ export default function Supplies() {
               </button>
 
               <Button variant="secondary" onClick={() => setDeletePrompt(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Consolidation prompt modal */}
+      {consolidatePrompt && (
+        <div
+          onClick={() => setConsolidatePrompt(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            zIndex: 200, padding: '0 0 env(safe-area-inset-bottom)',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="card"
+            style={{ width: '100%', maxWidth: 430, borderRadius: '20px 20px 0 0', padding: 24, paddingBottom: 32 }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 8 }}>
+              Duplicate Supply Found
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--bark)', marginBottom: 20 }}>
+              This looks like a supply you already have — add to existing stock?
+            </div>
+
+            <div style={{ background: 'var(--cream)', borderRadius: 10, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: 'var(--dust)' }}>
+              <div style={{ fontWeight: 600, color: 'var(--charcoal)', marginBottom: 4 }}>
+                {consolidatePrompt.existing.name}{consolidatePrompt.existing.brand ? ` · ${consolidatePrompt.existing.brand}` : ''}
+              </div>
+              <div>Current: {consolidatePrompt.existing.totalQty} {consolidatePrompt.existing.unit} · ${consolidatePrompt.existing.totalCost.toFixed(2)}</div>
+              <div>Adding: {consolidatePrompt.incoming.totalQty} {consolidatePrompt.incoming.unit} · ${consolidatePrompt.incoming.totalCost.toFixed(2)}</div>
+              <div style={{ marginTop: 4, fontWeight: 600, color: 'var(--sienna)' }}>
+                Combined: {consolidatePrompt.existing.totalQty + consolidatePrompt.incoming.totalQty} {consolidatePrompt.existing.unit} · ${(consolidatePrompt.existing.totalCost + consolidatePrompt.incoming.totalCost).toFixed(2)}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                onClick={handleAddToStock}
+                style={{
+                  padding: '14px 16px', borderRadius: 12, textAlign: 'left',
+                  border: '1.5px solid var(--sage)', background: '#fff',
+                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 2 }}>Yes, add to stock</div>
+                <div style={{ fontSize: 12, color: 'var(--dust)' }}>
+                  Merge into existing record. Cost-per-unit recalculates automatically.
+                </div>
+              </button>
+
+              <button
+                onClick={handleKeepSeparate}
+                style={{
+                  padding: '14px 16px', borderRadius: 12, textAlign: 'left',
+                  border: '1.5px solid var(--sand)', background: '#fff',
+                  cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)', marginBottom: 2 }}>No, keep separate</div>
+                <div style={{ fontSize: 12, color: 'var(--dust)' }}>
+                  Save as a new line item.
+                </div>
+              </button>
+
+              <Button variant="secondary" onClick={() => setConsolidatePrompt(null)}>
                 Cancel
               </Button>
             </div>
