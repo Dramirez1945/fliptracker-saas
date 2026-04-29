@@ -16,15 +16,15 @@ export default function ItemDetail() {
   const navigate = useNavigate();
   const { items, allocs, supplies, saveItems, saveAllocs } = useApp();
 
-  const item = items.find(i => i.id === id);
-  if (!item) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--dust)' }}>Item not found.</div>;
-
-  // Initialise pctMap from existing allocs for this item
+  // All hooks must come before any conditional return
   const existingAllocs = allocs.filter(a => a.itemId === id);
   const [pctMap, setPctMap] = useState(() =>
     existingAllocs.reduce((m, a) => ({ ...m, [a.supplyId]: a.pctUsed }), {})
   );
   const [supplyOpen, setSupplyOpen] = useState(false);
+
+  const item = items.find(i => i.id === id);
+  if (!item) return <div style={{ padding: 32, textAlign: 'center', color: 'var(--dust)' }}>Item not found.</div>;
 
   const trueCost = itemTrueCost(item, allocs);
   const supplyCost = itemSupplyCost(item.id, allocs);
