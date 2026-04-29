@@ -101,7 +101,7 @@ export default function Inventory() {
                         </div>
                         <Badge variant={item.status}>{item.status}</Badge>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--dust)', marginBottom: 4 }}>{item.storeChain}</div>
+                      <div style={{ fontSize: 12, color: 'var(--dust)', marginBottom: 4 }}>{item.storeChain}{item.storeArea ? ` — ${item.storeArea}` : ''}</div>
                       <div style={{ display: 'flex', gap: 12, fontSize: 13 }}>
                         <span style={{ color: 'var(--bark)' }}>Paid <strong>${item.cost}</strong></span>
                         {item.status === 'sold' && (

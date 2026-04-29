@@ -139,7 +139,7 @@ export default function ItemDetail() {
             <div className="label-caps" style={{ marginBottom: 12 }}>Details</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
-                ['Source', `${item.storeChain}${item.storeArea ? ' · ' + item.storeArea : ''}`],
+                ['Source', `${item.storeChain}${item.storeArea ? ' — ' + item.storeArea : ''}`],
                 ['Condition', item.condition],
                 tierLabel && ['Quality tier', tierLabel],
                 item.notes && ['Notes', item.notes],

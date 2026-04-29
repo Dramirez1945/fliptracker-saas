@@ -114,7 +114,7 @@ export default function Dashboard() {
                             {catLabel(item.category)}
                           </div>
                           <div style={{ fontSize: 11, color: 'var(--dust)', marginBottom: 4 }}>
-                            {item.storeChain}
+                            {item.storeChain}{item.storeArea ? ` — ${item.storeArea}` : ''}
                           </div>
                           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--sienna)' }}>
                             ${item.cost}
