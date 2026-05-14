@@ -19,6 +19,7 @@ export default function Supplies() {
   const [collapsed, setCollapsed] = useState({});
   const [deletePrompt, setDeletePrompt] = useState(null); // { supply, remQty, remVal }
   const [consolidatePrompt, setConsolidatePrompt] = useState(null); // { existing, incoming }
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
@@ -33,6 +34,18 @@ export default function Supplies() {
   // Only show active supplies on this page
   const activeSupplies = supplies.filter(s => (s.status || 'active') === 'active');
   const archivedCount = supplies.filter(s => s.status === 'depleted').length;
+
+  const filteredSupplies = searchQuery.trim()
+    ? activeSupplies.filter(s => {
+        const q = searchQuery.toLowerCase();
+        return (
+          s.name.toLowerCase().includes(q) ||
+          (s.brand || '').toLowerCase().includes(q) ||
+          (s.notes || '').toLowerCase().includes(q) ||
+          (s.store || '').toLowerCase().includes(q)
+        );
+      })
+    : null;
 
   function resetForm() {
     setName(''); setBrand(''); setCategory(''); setTotalQty('');
@@ -189,8 +202,103 @@ export default function Supplies() {
             <StatCard label="Active" value={activeSupplies.length} />
           </div>
 
+          {/* Search */}
+          <div style={{ position: 'relative', marginBottom: 16 }}>
+            <input
+              type="search"
+              placeholder="Search supplies… (e.g. 4.5 inch pull)"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%', padding: '12px 40px 12px 13px',
+                borderRadius: 12, border: '1.5px solid var(--sand)',
+                background: '#fff', fontSize: 15,
+                fontFamily: "'DM Sans', sans-serif",
+                color: 'var(--charcoal)', outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                style={{
+                  position: 'absolute', right: 12, top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none', border: 'none',
+                  color: 'var(--dust)', fontSize: 18, cursor: 'pointer',
+                  lineHeight: 1, padding: 0,
+                }}
+              >×</button>
+            )}
+          </div>
+
+          {/* Search results (flat) */}
+          {filteredSupplies !== null && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+              {filteredSupplies.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--dust)' }}>
+                  <p>No supplies match "{searchQuery}"</p>
+                </div>
+              ) : (
+                filteredSupplies.map(supply => {
+                  const rem = supplyRemaining(supply, allocs);
+                  const remVal = supplyValueRemaining(supply, allocs);
+                  const pctRem = supply.totalQty > 0 ? (rem / supply.totalQty) * 100 : 0;
+                  const barColor = pctRem > 50 ? 'var(--sage)' : pctRem > 20 ? 'var(--gold)' : 'var(--sienna)';
+                  return (
+                    <div key={supply.id} className="card" style={{ padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--charcoal)' }}>{supply.name}</div>
+                          <div style={{ fontSize: 12, color: 'var(--dust)' }}>
+                            {supply.brand} · {supply.store && `${supply.store} · `}
+                            {new Date(supply.purchaseDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--sage)' }}>${remVal.toFixed(2)}</div>
+                          <div style={{ fontSize: 11, color: 'var(--dust)' }}>{rem.toFixed(1)} {supply.unit} left</div>
+                        </div>
+                      </div>
+                      <div className="progress-bar" style={{ marginBottom: 8 }}>
+                        <div className="progress-bar-fill" style={{ width: `${Math.min(100, pctRem)}%`, background: barColor }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Badge variant="default">{supply.category || 'Uncategorized'}</Badge>
+                        <span style={{ fontSize: 12, color: 'var(--dust)' }}>${costPerUnit(supply).toFixed(2)} / {supply.unit}</span>
+                      </div>
+                      {supply.notes && (
+                        <div style={{ fontSize: 12, color: 'var(--dust)', marginTop: 6, fontStyle: 'italic' }}>{supply.notes}</div>
+                      )}
+                      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                        <button
+                          onClick={() => openEdit(supply)}
+                          style={{
+                            flex: 1, padding: '7px 0', borderRadius: 8,
+                            border: '1.5px solid var(--sand)', background: '#fff',
+                            color: 'var(--bark)', fontSize: 13, fontWeight: 600,
+                            cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                          }}
+                        >Edit</button>
+                        <button
+                          onClick={() => handleDeleteClick(supply)}
+                          style={{
+                            flex: 1, padding: '7px 0', borderRadius: 8,
+                            border: '1.5px solid var(--sienna)', background: '#fff',
+                            color: 'var(--sienna)', fontSize: 13, fontWeight: 600,
+                            cursor: 'pointer', fontFamily: "'DM Sans', sans-serif",
+                          }}
+                        >Delete</button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
           {/* Supply list by category */}
-          {Object.entries(byCategory).map(([cat, items]) => (
+          {filteredSupplies === null && Object.entries(byCategory).map(([cat, items]) => (
             <section key={cat} style={{ marginBottom: 16 }}>
               <button
                 onClick={() => setCollapsed(c => ({ ...c, [cat]: !c[cat] }))}
