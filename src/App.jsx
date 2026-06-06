@@ -1,8 +1,10 @@
-import { createContext, useContext, useState, useCallback } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { storage, KEYS } from './storage';
+import { supabase } from './supabaseClient';
 import BottomNav from './components/ui/BottomNav';
 import ToastContainer from './components/ui/Toast';
+import Auth from './pages/Auth';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import AddItem from './pages/AddItem';
@@ -52,9 +54,38 @@ function AppProvider({ children }) {
 }
 
 function Layout() {
+  const location = useLocation();
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const onAuth = location.pathname === '/auth';
+
+  if (loading) {
+    return (
+      <div className="app-shell" style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <span className="spinner spinner-dark" />
+      </div>
+    );
+  }
+
+  if (!session && !onAuth) return <Navigate to="/auth" replace />;
+  if (session && onAuth) return <Navigate to="/" replace />;
+
   return (
     <div className="app-shell">
       <Routes>
+        <Route path="/auth"             element={<Auth />} />
         <Route path="/"                 element={<Dashboard />} />
         <Route path="/inventory"        element={<Inventory />} />
         <Route path="/add"              element={<AddItem />} />
@@ -67,7 +98,7 @@ function Layout() {
         <Route path="/supplies/archived/:id" element={<EditArchivedSupply />} />
         <Route path="/sales"            element={<SalesHistory />} />
       </Routes>
-      <BottomNav />
+      {session && !onAuth && <BottomNav />}
       <ToastContainer />
     </div>
   );
