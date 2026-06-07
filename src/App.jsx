@@ -1,9 +1,9 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { storage, KEYS } from './storage';
 import { supabase } from './supabaseClient';
 import BottomNav from './components/ui/BottomNav';
-import ToastContainer from './components/ui/Toast';
+import ToastContainer, { showToast } from './components/ui/Toast';
 import Auth from './pages/Auth';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
@@ -21,30 +21,80 @@ const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
 
 function AppProvider({ children }) {
-  const [items, setItems] = useState(() => storage.get(KEYS.items));
-  const [supplies, setSupplies] = useState(() => storage.get(KEYS.supplies));
-  const [allocs, setAllocs] = useState(() => storage.get(KEYS.allocs));
-  const [savedStores, setSavedStores] = useState(() => storage.get(KEYS.savedStores));
+  const [items, setItems] = useState([]);
+  const [supplies, setSupplies] = useState([]);
+  const [allocs, setAllocs] = useState([]);
+  const [savedStores, setSavedStores] = useState([]);
+  const [dataLoading, setDataLoading] = useState(true);
+  const loadedUserRef = useRef(null);
 
-  const saveItems = useCallback((val) => {
+  // Load the signed-in user's data from Supabase; reload on login, clear on logout.
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        loadedUserRef.current = null;
+        if (active) { setItems([]); setSupplies([]); setAllocs([]); setDataLoading(false); }
+        return;
+      }
+      if (loadedUserRef.current === user.id) { if (active) setDataLoading(false); return; }
+      loadedUserRef.current = user.id;
+      if (active) setDataLoading(true);
+      try {
+        const [i, s, a, st] = await Promise.all([
+          storage.get(KEYS.items),
+          storage.get(KEYS.supplies),
+          storage.get(KEYS.allocs),
+          storage.get(KEYS.savedStores),
+        ]);
+        if (active) { setItems(i); setSupplies(s); setAllocs(a); setSavedStores(st); }
+      } catch (e) {
+        console.error(e);
+        showToast('Failed to load your data', 'error');
+      } finally {
+        if (active) setDataLoading(false);
+      }
+    }
+
+    load();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') load();
+    });
+    return () => { active = false; subscription.unsubscribe(); };
+  }, []);
+
+  const saveItems = useCallback(async (val) => {
     setItems(val);
-    storage.set(KEYS.items, val);
+    try { await storage.set(KEYS.items, val); }
+    catch (e) { console.error(e); showToast('Failed to save changes', 'error'); }
   }, []);
 
-  const saveSupplies = useCallback((val) => {
+  const saveSupplies = useCallback(async (val) => {
     setSupplies(val);
-    storage.set(KEYS.supplies, val);
+    try { await storage.set(KEYS.supplies, val); }
+    catch (e) { console.error(e); showToast('Failed to save changes', 'error'); }
   }, []);
 
-  const saveAllocs = useCallback((val) => {
+  const saveAllocs = useCallback(async (val) => {
     setAllocs(val);
-    storage.set(KEYS.allocs, val);
+    try { await storage.set(KEYS.allocs, val); }
+    catch (e) { console.error(e); showToast('Failed to save changes', 'error'); }
   }, []);
 
   const saveSavedStores = useCallback((val) => {
     setSavedStores(val);
     storage.set(KEYS.savedStores, val);
   }, []);
+
+  if (dataLoading) {
+    return (
+      <div className="app-shell" style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <span className="spinner spinner-dark" />
+      </div>
+    );
+  }
 
   return (
     <AppCtx.Provider value={{ items, supplies, allocs, savedStores, saveItems, saveSupplies, saveAllocs, saveSavedStores }}>
