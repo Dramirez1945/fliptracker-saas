@@ -12,6 +12,17 @@ import { showToast } from '../components/ui/Toast';
 function catLabel(id) { return CATEGORIES.find(c => c.id === id)?.label || id; }
 function catIcon(id)  { return CATEGORIES.find(c => c.id === id)?.icon  || '✦'; }
 
+const COUNT_UNITS = ['count', 'sheets'];
+const isCountUnit = (u) => COUNT_UNITS.includes((u || '').toLowerCase());
+const fmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+// raw input string -> percentage (the canonical stored value)
+function inputToPct(supply, raw) {
+  const v = parseFloat(raw);
+  if (isNaN(v)) return 0;
+  return isCountUnit(supply.unit) ? (v / supply.totalQty) * 100 : v;
+}
+
 export default function ItemDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -19,12 +30,16 @@ export default function ItemDetail() {
 
   // All hooks must come before any conditional return
   const existingAllocs = allocs.filter(a => a.itemId === id);
-  const [pctMap, setPctMap] = useState(() =>
-    existingAllocs.reduce((m, a) => ({ ...m, [a.supplyId]: a.pctUsed }), {})
+  const [inputMap, setInputMap] = useState(() =>
+    existingAllocs.reduce((m, a) => {
+      const supply = supplies.find(s => s.id === a.supplyId);
+      const raw = supply && isCountUnit(supply.unit) ? a.qtyUsed : a.pctUsed;
+      return { ...m, [a.supplyId]: raw };
+    }, {})
   );
   const [supplyOpen, setSupplyOpen] = useState(false);
   const [editAlloc, setEditAlloc] = useState(null); // { supply }
-  const [editPct, setEditPct] = useState('');
+  const [editPct, setEditPct] = useState(''); // raw input (qty for count units, % otherwise)
   const [removePrompt, setRemovePrompt] = useState(null); // { supply }
 
   const item = items.find(i => i.id === id);
@@ -53,7 +68,7 @@ export default function ItemDetail() {
   }
 
   const pendingSupplyCost = visibleSupplies.reduce((sum, s) => {
-    const pct = parseFloat(pctMap[s.id]) || 0;
+    const pct = inputToPct(s, inputMap[s.id]);
     return pct > 0 ? sum + calcAlloc(s, pct).costAllocated : sum;
   }, 0);
 
@@ -74,9 +89,9 @@ export default function ItemDetail() {
   function saveAllocations() {
     const otherAllocs = allocs.filter(a => a.itemId !== id);
     const newItemAllocs = visibleSupplies
-      .filter(s => parseFloat(pctMap[s.id]) > 0)
+      .filter(s => inputToPct(s, inputMap[s.id]) > 0)
       .map(s => {
-        const pct = parseFloat(pctMap[s.id]);
+        const pct = inputToPct(s, inputMap[s.id]);
         const { qtyUsed, costAllocated } = calcAlloc(s, pct);
         return {
           id: `${id}-${s.id}`,
@@ -96,16 +111,22 @@ export default function ItemDetail() {
 
   function handleOpenEdit(supply) {
     setEditAlloc({ supply });
-    setEditPct(String(pctMap[supply.id] ?? ''));
+    setEditPct(String(inputMap[supply.id] ?? ''));
   }
 
   function handleSaveEdit() {
     const { supply } = editAlloc;
-    const pct = parseFloat(editPct);
-    if (isNaN(pct) || pct < 0 || pct > 100) {
+    const raw = parseFloat(editPct);
+    if (isCountUnit(supply.unit)) {
+      if (isNaN(raw) || raw < 0 || raw > supply.totalQty) {
+        showToast(`Enter a quantity between 0 and ${fmt(supply.totalQty)}`, 'error');
+        return;
+      }
+    } else if (isNaN(raw) || raw < 0 || raw > 100) {
       showToast('Enter a value between 0 and 100', 'error');
       return;
     }
+    const pct = inputToPct(supply, editPct);
     const { qtyUsed, costAllocated } = calcAlloc(supply, pct);
     const updatedAlloc = {
       id: `${id}-${supply.id}`,
@@ -121,7 +142,7 @@ export default function ItemDetail() {
       updatedAlloc,
     ];
     saveAllocs(newAllocs);
-    setPctMap(m => ({ ...m, [supply.id]: pct }));
+    setInputMap(m => ({ ...m, [supply.id]: editPct }));
     runAutoArchive(newAllocs);
     setEditAlloc(null);
     showToast('Allocation updated.');
@@ -131,7 +152,7 @@ export default function ItemDetail() {
     const { supply } = removePrompt;
     const newAllocs = allocs.filter(a => !(a.itemId === id && a.supplyId === supply.id));
     saveAllocs(newAllocs);
-    setPctMap(m => { const next = { ...m }; delete next[supply.id]; return next; });
+    setInputMap(m => { const next = { ...m }; delete next[supply.id]; return next; });
     runAutoArchive(newAllocs);
     setRemovePrompt(null);
     showToast('Allocation removed.');
@@ -277,9 +298,10 @@ export default function ItemDetail() {
                   </div>
                 ) : (
                   visibleSupplies.map((supply, i) => {
-                    const pct = parseFloat(pctMap[supply.id]) || 0;
+                    const pct = inputToPct(supply, inputMap[supply.id]);
                     const { qtyUsed, costAllocated } = pct > 0 ? calcAlloc(supply, pct) : { qtyUsed: 0, costAllocated: 0 };
                     const rem = supplyRemaining(supply, allocs);
+                    const countBased = isCountUnit(supply.unit);
                     return (
                       <div key={supply.id}>
                         {i > 0 && <hr className="divider" />}
@@ -290,12 +312,14 @@ export default function ItemDetail() {
                                 {supply.name}
                               </div>
                               <div style={{ fontSize: 11, color: 'var(--dust)' }}>
-                                {supply.brand} · {rem.toFixed(1)} {supply.unit} remaining
+                                {supply.brand} · {countBased
+                                  ? `${fmt(rem)} of ${fmt(supply.totalQty)} ${supply.unit} remaining`
+                                  : `${rem.toFixed(1)} ${supply.unit} remaining`}
                               </div>
                             </div>
                             {pct > 0 && (
                               <div style={{ fontSize: 12, color: 'var(--sage)', fontWeight: 600, textAlign: 'right' }}>
-                                {qtyUsed.toFixed(1)} {supply.unit}<br />
+                                {fmt(qtyUsed)} {supply.unit}<br />
                                 ${costAllocated.toFixed(2)}
                               </div>
                             )}
@@ -303,9 +327,9 @@ export default function ItemDetail() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <input
                               type="number"
-                              min="0" max="100" step="1"
-                              value={pctMap[supply.id] ?? ''}
-                              onChange={e => setPctMap(m => ({ ...m, [supply.id]: e.target.value }))}
+                              min="0" max={countBased ? supply.totalQty : 100} step="1"
+                              value={inputMap[supply.id] ?? ''}
+                              onChange={e => setInputMap(m => ({ ...m, [supply.id]: e.target.value }))}
                               placeholder="0"
                               style={{
                                 width: 70, padding: '8px 12px', borderRadius: 10,
@@ -314,7 +338,9 @@ export default function ItemDetail() {
                                 textAlign: 'center',
                               }}
                             />
-                            <span style={{ fontSize: 13, color: 'var(--dust)' }}>% used</span>
+                            <span style={{ fontSize: 13, color: 'var(--dust)' }}>
+                              {countBased ? `${supply.unit} used` : '% used'}
+                            </span>
                             {pct > 0 && (
                               <span style={{ fontSize: 12, color: 'var(--bark)' }}>
                                 = ${costAllocated.toFixed(2)}
@@ -463,7 +489,9 @@ export default function ItemDetail() {
       {/* Edit allocation modal */}
       {editAlloc && (() => {
         const { supply } = editAlloc;
-        const pct = parseFloat(editPct) || 0;
+        const countBased = isCountUnit(supply.unit);
+        const rem = supplyRemaining(supply, allocs);
+        const pct = inputToPct(supply, editPct);
         const { qtyUsed, costAllocated } = pct > 0 ? calcAlloc(supply, pct) : { qtyUsed: 0, costAllocated: 0 };
         return (
           <div
@@ -487,7 +515,7 @@ export default function ItemDetail() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
                 <input
                   type="number"
-                  min="0" max="100" step="1"
+                  min="0" max={countBased ? supply.totalQty : 100} step="1"
                   value={editPct}
                   onChange={e => setEditPct(e.target.value)}
                   style={{
@@ -498,14 +526,18 @@ export default function ItemDetail() {
                   }}
                   autoFocus
                 />
-                <span style={{ fontSize: 14, color: 'var(--dust)' }}>% used</span>
+                <span style={{ fontSize: 14, color: 'var(--dust)' }}>
+                  {countBased
+                    ? `${supply.unit} used · ${fmt(rem)} of ${fmt(supply.totalQty)} remaining`
+                    : '% used'}
+                </span>
               </div>
 
               {pct > 0 && (
                 <div style={{ background: 'var(--cream)', borderRadius: 10, padding: '10px 14px', marginBottom: 20, fontSize: 13, color: 'var(--bark)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Quantity used</span>
-                    <span style={{ fontWeight: 600 }}>{qtyUsed.toFixed(2)} {supply.unit}</span>
+                    <span style={{ fontWeight: 600 }}>{fmt(qtyUsed)} {supply.unit}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
                     <span>Cost allocated</span>
