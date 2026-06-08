@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../App';
+import { supabase } from '../supabaseClient';
+import { incrementItemCount } from '../lib/tierUtils';
 import { CATEGORIES, STORE_CHAINS, CONDITIONS } from '../constants';
 import { showToast } from '../components/ui/Toast';
 import PageHeader from '../components/layout/PageHeader';
@@ -26,7 +28,7 @@ export default function AddItem() {
   function next() { setStep(s => Math.min(s + 1, TOTAL_STEPS)); }
   function back() { if (step === 1) navigate(-1); else setStep(s => s - 1); }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const id = Date.now().toString();
     const newItem = {
       id,
@@ -62,6 +64,8 @@ export default function AddItem() {
     }
 
     saveItems([...items, newItem]);
+    const { data: { user } } = await supabase.auth.getUser();
+    await incrementItemCount(user.id);
     showToast('Item added to inventory!');
     navigate(`/item/${id}`);
   }

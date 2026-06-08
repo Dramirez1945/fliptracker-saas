@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useTierContext } from '../../context/TierContext';
 
 const tabs = [
   { path: '/',        icon: '⊞',  label: 'Home' },
@@ -10,6 +11,7 @@ const tabs = [
 export default function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { tier, aiGensUsed, itemsCreated } = useTierContext();
 
   const active = (path) => {
     if (path === '/') return location.pathname === '/';
@@ -29,9 +31,15 @@ export default function BottomNav() {
       WebkitBackdropFilter: 'blur(12px)',
       borderTop: '1.5px solid var(--sand)',
       display: 'flex',
+      flexDirection: 'column',
       paddingBottom: 'env(safe-area-inset-bottom)',
       zIndex: 100,
     }}>
+      {/* TEMP dev scaffolding — remove in Phase 3 */}
+      <div style={{ fontSize: '11px', color: 'var(--dust)', padding: '4px 8px', textAlign: 'center' }}>
+        Tier: {tier} | Items: {itemsCreated} | AI: {aiGensUsed}
+      </div>
+      <div style={{ display: 'flex' }}>
       {tabs.map(tab => (
         <button
           key={tab.path}
@@ -71,6 +79,7 @@ export default function BottomNav() {
           )}
         </button>
       ))}
+      </div>
     </nav>
   );
 }

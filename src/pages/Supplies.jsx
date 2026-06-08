@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../App';
+import { supabase } from '../supabaseClient';
+import { incrementSupplyCount } from '../lib/tierUtils';
 import { supplyRemaining, supplyValueRemaining } from '../storage';
 import { archiveSupply } from '../archiveUtils';
 import { SUPPLY_CATEGORIES, SUPPLY_UNITS } from '../constants';
@@ -68,7 +70,7 @@ export default function Supplies() {
     setShowAdd(true);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!name || !totalQty || !totalCost) {
       showToast('Name, quantity and cost are required', 'error');
       return;
@@ -106,6 +108,8 @@ export default function Supplies() {
       return;
     }
     saveSupplies([...supplies, incoming]);
+    const { data: { user } } = await supabase.auth.getUser();
+    await incrementSupplyCount(user.id);
     showToast('Supply added!');
     resetForm();
     setShowAdd(false);
@@ -126,9 +130,11 @@ export default function Supplies() {
     setShowAdd(false);
   }
 
-  function handleKeepSeparate() {
+  async function handleKeepSeparate() {
     const { incoming } = consolidatePrompt;
     saveSupplies([...supplies, incoming]);
+    const { data: { user } } = await supabase.auth.getUser();
+    await incrementSupplyCount(user.id);
     setConsolidatePrompt(null);
     showToast('Supply added as separate record.');
     resetForm();
